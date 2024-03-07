@@ -5,7 +5,7 @@ from pyecharts.charts import Bar
 from pyecharts import options as opts
 import numpy as np
 import pandas as pd
-
+import math
 
 def format_currency(value):
     """Helper function to format currency values."""
@@ -98,6 +98,44 @@ def display_input_explanations():
         """
     )
 
+def display_vulnerability_input():
+    st.subheader("Vulnerability")
+    with st.form("Vulnerability Input"):
+        # Example of direct input; for larger datasets, consider file upload and processing
+        vulnerability_scores = st.text_area("Enter vulnerability scores, separated by commas", "0.5, 0.6, 0.4")
+        vulnerability_submitted = st.form_submit_button("Submit Vulnerability Scores")
+        if vulnerability_submitted:
+            vulnerability_scores = [float(score.strip()) for score in vulnerability_scores.split(",")]
+            st.session_state["vulnerability_scores"] = vulnerability_scores
+            st.success("Vulnerability scores submitted successfully!")
+
+
+def calculate_vulnerability_statistics(vulnerability_scores):
+    """
+    Calculate mean and standard deviation for the given list of vulnerability scores.
+
+    :param vulnerability_scores: List of vulnerability scores.
+    :return: Tuple containing the mean and standard deviation of the scores.
+    """
+    if not vulnerability_scores:
+        return None, None  # or default values
+    
+    vulnerability_mean = np.mean(vulnerability_scores)
+    vulnerability_std_dev = np.std(vulnerability_scores)
+    
+    return vulnerability_mean, vulnerability_std_dev
+
+def display_vulnerability_statistics(vulnerability_mean, vulnerability_std_dev):
+    """
+    Display vulnerability mean and standard deviation in Streamlit.
+
+    :param vulnerability_mean: Mean of vulnerability scores.
+    :param vulnerability_std_dev: Standard deviation of vulnerability scores.
+    """
+    st.write(f"Mean Vulnerability: {vulnerability_mean:.2f}")
+    st.write(f"Vulnerability Standard Deviation: {vulnerability_std_dev:.2f}")
+
+
 
 def calculate_fair_model(lm_min, lm_max, tef, tef_stdev, vuln, vuln_stdev):
     # lef_mean = (lef_min + lef_max) / 2
@@ -145,29 +183,65 @@ def calculate_percentiles(values):
 
 
 def display_tef_calculator():
+    st.header("Threat Event Frequency")
+
     with st.form("Threat Event Frequency Calculator"):
         freq = st.number_input(
             label="Frequency of Events", value=1, min_value=1, max_value=1000
         )
         reoccurance = st.number_input(
-            label="Per Year(s)", value=1, min_value=1, max_value=100
+            label="Per Year(s)", value=4, min_value=1, max_value=100
         )
+
+        distribution_type = st.selectbox('Distribution type', ('Poisson', 'PERT'))
 
         tef_submitted = st.form_submit_button(label="Calculate")
         if tef_submitted:
             tef_value = freq / reoccurance
             st.session_state["tef_value"] = tef_value
+            st.session_state["distribution_type"] = distribution_type
+            st.success("Threat Event Frequency submitted successfully!")
+
+def display_tef_statistics(tef_mean, tef_stdev):
+    """
+    Display the calculated TEF statistics in Streamlit.
+
+    :param tef_mean: Float representing the mean TEF.
+    :param tef_stdev: Float representing the standard deviation of TEF.
+    """
+    st.subheader("Threat Event Frequency (TEF) Statistics")
+    # Using markdown for better formatting
+    st.markdown(f"**Mean TEF:** {tef_mean:.4f} events per year")
+    st.markdown(f"**TEF Standard Deviation:** {tef_stdev:.4f} events per year")
 
 
 def main():
+    tef_mean = 0.0
+    vuln = 0.0
+    vuln_stdev = 0.0
+
     st.title("FAIR Risk Calculation with PyFair and ECharts")
     display_fair_explanation()
     display_input_explanations()
+    display_vulnerability_input()  # To collect vulnerability scores
 
-    tef_mean = 0.0
+
+    if "vulnerability_scores" in st.session_state:
+            vulnerability_scores = st.session_state["vulnerability_scores"]
+            vuln, vuln_stdev = calculate_vulnerability_statistics(vulnerability_scores)
+            display_vulnerability_statistics(vuln, vuln_stdev)
+
     display_tef_calculator()
+
+
     if "tef_value" in st.session_state:
         tef_mean = st.session_state["tef_value"]
+    
+    distribution_type = "Poisson" # default
+    if "distribution_type" in st.session_state:
+        distribution_type = st.session_state["distribution_type"]
+        # calculate_tef_statistics()
+
     with st.form("model_input"):
         min, max = st.columns(2)
         with min:
@@ -184,13 +258,14 @@ def main():
                 min_value=0.0,
                 max_value=1.0,
                 value=tef_mean,
-                help="Enter the minimum estimated Threat Event Frequency",
+                help="Enter the most likely Threat Event Frequency",
             )
             vuln = st.number_input(
                 label="Vulnerability",
                 key="Vulnerability",
                 min_value=0.0,
                 max_value=1.0,
+                value = vuln,
                 help="Enter the mean estimated Vulnerability",
             )
         with max:
@@ -201,18 +276,38 @@ def main():
                 value=500000000,
                 help="Enter the maximum estimated financial impact from a single event.",
             )
-            tef_stdev = st.number_input(
-                label="Threat Event Frequency Standard Deviation",
-                key="Threat Event Frequency Deviation",
-                min_value=0.0,
-                max_value=1.0,
-                help="Enter the maximum estimated Threat Event Frequency Deviation",
-            )
+            if (distribution_type == 'PERT'):
+                tef_min = st.number_input(
+                    label="Threat Event Frequency Min",
+                    key="Threat Event Frequency Min",
+                    min_value=0.0,
+                    max_value=1.0,
+                    help="Enter the maximum estimated Threat Event Frequency Deviation",
+                )
+                tef_max = st.number_input(
+                    label="Threat Event Frequency Max",
+                    key="Threat Event Frequency Max",
+                    min_value=0.0,
+                    max_value=1.0,
+                    help="Enter the maximum estimated Threat Event Frequency Deviation",
+                )
+                tef_stdev = (tef_max - tef_min) / 6 
+            elif (distribution_type == 'Poisson'):
+                # Standard deviation of a Poisson distribution
+                poisson_stdev = math.sqrt(tef)
+                tef_stdev = st.number_input(
+                    label="Threat Event Frequency Standard Deviation",
+                    key="Threat Event Frequency  Standard Deviation Poisson",
+                    value=poisson_stdev,
+                    help="Enter the standard deviation estimated for Vulnerability",
+                    disabled = True
+                 )
             vuln_stdev = st.number_input(
                 label="Vulnerability Standard Deviation",
                 key="Vulnerability Standard Deviation",
                 min_value=0.0,
                 max_value=1.0,
+                value = vuln_stdev,
                 help="Enter the standard deviation estimated for Vulnerability",
             )
 
@@ -220,6 +315,8 @@ def main():
 
     if submitted:
         with st.spinner("Calculating..."):
+            st.write(f"calculate_fair_model({lm_min_value}, {lm_max_value}, {tef}, {tef_stdev}, {vuln}, {vuln_stdev})")
+
             model = calculate_fair_model(
                 lm_min_value,
                 lm_max_value,
